@@ -1,0 +1,84 @@
+version: '3'
+
+services:
+  redis:
+    image: redis
+    container_name: tower-redis
+    restart: always
+    ports:
+      - "6379:6379"
+  es:
+    image: elasticsearch:7.5.1
+    container_name: tower-es01
+    restart: always
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - es_data_01:/usr/share/elasticsearch/data
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms3g -Xmx3g"
+    ports:
+      - "9200:9200"
+  kibana:
+    image: kibana:7.5.1
+    container_name: tower-kibana
+    restart: always
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_URL: http://es:9200
+      ELASTICSEARCH_HOSTS: http://es:9200
+    depends_on:
+      - es
+  fluentd:
+    build: ./fluentd/docker
+    image: ffv-fluentd:v1
+    container_name: tower-fluentd
+    command: -c /fluentd/etc/fluentd.conf
+    restart: always
+    environment:
+      ES_HOST: es
+      FLUENT_UID: 0
+    volumes:
+      - backend_api_log_01:/ffv/log
+      - ./fluentd/conf:/fluentd/etc
+  backend:
+    build: .
+    image: tower-server:v1
+    container_name: tower-api-service
+    command: python server.py
+    restart: always
+    volumes:
+      - backend_api_data_01:/opt/tower/data
+    environment:
+      ES_HOST: es
+      REDIS_HOST: redis
+    ports:
+      - "5000:5000"
+    depends_on:
+      - redis
+      - es
+  logmux:
+    #build: .
+    image: tower-server:v1
+    container_name: tower-log-service
+    command: python logmux.py
+    restart: always
+    volumes:
+      - backend_api_log_01:/tmp/log
+    environment:
+      REDIS_HOST: redis
+    depends_on:
+      - redis
+      - fluentd
+
+volumes:
+  es_data_01:
+    driver: local
+  backend_api_data_01:
+    driver: local
+  backend_api_log_01:
+    driver: local
